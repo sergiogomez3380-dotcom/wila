@@ -174,6 +174,32 @@ body{background:var(--bg);font-family:'Inter',sans-serif;color:var(--text);min-h
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .sync-dot{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;border-radius:20px;padding:3px 12px;font-size:.6rem;font-weight:600;opacity:0;transition:opacity .3s;z-index:999;pointer-events:none}
 .sync-dot.show{opacity:1}
+
+/* Gmail panel */
+.gmail-connect-card{background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:24px 20px;text-align:center;box-shadow:var(--shadow)}
+.gmail-connect-card h3{font-family:'Syne',sans-serif;font-size:1rem;font-weight:700;margin-bottom:8px}
+.gmail-connect-card p{font-size:.78rem;color:var(--soft);margin-bottom:20px;line-height:1.5}
+.btn-gmail{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;background:#fff;color:#3c4043;border:1.5px solid var(--border);border-radius:12px;padding:13px;font-family:'Syne',sans-serif;font-size:.88rem;font-weight:700;cursor:pointer;box-shadow:var(--shadow);transition:box-shadow .15s}
+.btn-gmail:active{box-shadow:none}
+.gmail-status{background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px;display:flex;justify-content:space-between;align-items:center;box-shadow:var(--shadow)}
+.gmail-status-info{font-size:.8rem}
+.gmail-status-email{font-weight:600;color:var(--text)}
+.gmail-status-sub{font-size:.7rem;color:var(--soft);margin-top:2px}
+.btn-scan{background:linear-gradient(135deg,#FF8C38,#E8610A);border:none;border-radius:10px;padding:10px 18px;font-family:'Syne',sans-serif;font-size:.78rem;font-weight:700;color:#fff;cursor:pointer;white-space:nowrap}
+.btn-scan:disabled{opacity:.6;cursor:not-allowed}
+.suggestion-card{background:var(--surface);border:1.5px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);animation:cardIn .2s ease}
+.suggestion-card .sug-header{padding:12px 14px 8px;display:flex;gap:10px;align-items:flex-start}
+.sug-icon{font-size:1.2rem;flex-shrink:0}
+.sug-body{flex:1;min-width:0}
+.sug-title{font-size:.88rem;font-weight:600;color:var(--text);line-height:1.3}
+.sug-meta{font-size:.7rem;color:var(--soft);margin-top:3px}
+.sug-note{font-size:.75rem;color:var(--soft);padding:0 14px 10px;line-height:1.4}
+.sug-actions{display:flex;gap:8px;padding:0 14px 14px}
+.btn-sug-add{flex:1;background:linear-gradient(135deg,#FF8C38,#E8610A);border:none;border-radius:10px;padding:10px;font-family:'Syne',sans-serif;font-size:.78rem;font-weight:700;color:#fff;cursor:pointer}
+.btn-sug-skip{background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 16px;font-family:'Inter',sans-serif;font-size:.75rem;font-weight:600;color:var(--soft);cursor:pointer}
+.scanning-indicator{text-align:center;padding:32px 20px;color:var(--soft)}
+.scanning-indicator .spinner{margin:0 auto 12px}
+.scanning-indicator p{font-size:.78rem}
 </style>
 </head>
 <body>
@@ -230,6 +256,7 @@ body{background:var(--bg);font-family:'Inter',sans-serif;color:var(--text);min-h
   <div class="sec-tabs">
     <div class="sec-tab active" id="sec-tasks" onclick="showSection('tasks')">📋 TAREAS</div>
     <div class="sec-tab" id="sec-reminders" onclick="showSection('reminders')">🔔 RECORDATORIOS</div>
+    <div class="sec-tab" id="sec-gmail" onclick="showSection('gmail')">✉ GMAIL</div>
   </div>
 
   <div class="filters-wrap">
@@ -253,6 +280,7 @@ body{background:var(--bg);font-family:'Inter',sans-serif;color:var(--text);min-h
 
   <div class="list-wrap" id="task-list"></div>
   <div class="list-wrap" id="rem-list" style="display:none"></div>
+  <div id="gmail-panel" style="display:none;padding:16px 20px;flex-direction:column;gap:12px"></div>
   <button class="fab work-fab" id="fab" onclick="openModal()">+</button>
 </div>
 
@@ -540,12 +568,15 @@ function resetFilterBtns(){
 function showSection(sec){
   currentSec=sec;const isP=currentCtx==='personal';
   document.querySelectorAll('.sec-tab').forEach(t=>t.classList.remove('active','personal-mode'));
-  const at=document.getElementById('sec-'+sec);at.classList.add('active');if(isP)at.classList.add('personal-mode');
+  const at=document.getElementById('sec-'+sec);at.classList.add('active');if(isP&&sec!=='gmail')at.classList.add('personal-mode');
   document.getElementById('task-list').style.display=sec==='tasks'?'flex':'none';
   document.getElementById('rem-list').style.display=sec==='reminders'?'flex':'none';
+  document.getElementById('gmail-panel').style.display=sec==='gmail'?'flex':'none';
   document.getElementById('filters-tasks').style.display=sec==='tasks'?'flex':'none';
   document.getElementById('filters-rem').style.display=sec==='reminders'?'flex':'none';
-  render();
+  document.getElementById('fab').style.display=sec==='gmail'?'none':'flex';
+  if(sec==='gmail') renderGmailPanel();
+  else render();
 }
 
 // ── Modal ──
@@ -831,11 +862,14 @@ document.getElementById('hdr-date').textContent=ds.charAt(0).toUpperCase()+ds.sl
 
 async function init(){
   showLoading();
+  // Check if this is a Gmail OAuth callback
+  if(checkGmailCallback()) return;
   try {
     const user = await getSessionFromHash();
     if(user){
       currentUser=user;
       console.log('User loaded:', currentUser.email);
+      loadGmailToken();
       buildCatSelects();updateNotifBtn();showApp();
       await loadData();
       if(NOTIF_OK){try{if(Notification.permission==='granted')setTimeout(checkNotifications,1200);}catch(e){}}
@@ -846,6 +880,236 @@ async function init(){
     console.error('Init error:', e);
     showLogin();
   }
+}
+
+// ── Gmail ──
+const GMAIL_CLIENT_ID = '830460289096-eqt583ad6a6cvtvmv3ira8da6v0ecbsk.apps.googleusercontent.com';
+const GMAIL_REDIRECT = 'https://sergiogomez3380-dotcom.github.io/wila';
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+let gmailToken = null;
+let gmailEmail = null;
+let suggestions = [];
+
+function connectGmail(){
+  const params = new URLSearchParams({
+    client_id: GMAIL_CLIENT_ID,
+    redirect_uri: GMAIL_REDIRECT,
+    response_type: 'token',
+    scope: GMAIL_SCOPE,
+    prompt: 'select_account'
+  });
+  window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
+}
+
+function disconnectGmail(){
+  gmailToken = null; gmailEmail = null;
+  localStorage.removeItem('gmail_token');
+  localStorage.removeItem('gmail_email');
+  renderGmailPanel();
+}
+
+async function getGmailProfile(){
+  const r = await fetch('https://www.googleapis.com/gmail/v1/users/me/profile', {
+    headers: {'Authorization': 'Bearer ' + gmailToken}
+  });
+  if(!r.ok) throw new Error('Token inválido');
+  const d = await r.json();
+  return d.emailAddress;
+}
+
+async function scanEmails(){
+  const btn = document.getElementById('btn-scan');
+  if(btn) btn.disabled = true;
+  const panel = document.getElementById('gmail-panel');
+  panel.innerHTML = `<div class="scanning-indicator"><div class="spinner"></div><p>Analizando correos con IA...</p></div>`;
+
+  try {
+    // Get last 10 emails
+    const listR = await fetch('https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=10&q=is:unread', {
+      headers: {'Authorization': 'Bearer ' + gmailToken}
+    });
+    const listD = await listR.json();
+    if(!listD.messages || listD.messages.length === 0){
+      renderGmailPanel('No hay correos nuevos para analizar.');
+      return;
+    }
+
+    // Get email contents
+    const emails = await Promise.all(listD.messages.slice(0,8).map(async m => {
+      const r = await fetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`, {
+        headers: {'Authorization': 'Bearer ' + gmailToken}
+      });
+      const d = await r.json();
+      const headers = d.payload.headers;
+      const subject = headers.find(h=>h.name==='Subject')?.value || '(sin asunto)';
+      const from = headers.find(h=>h.name==='From')?.value || '';
+      const date = headers.find(h=>h.name==='Date')?.value || '';
+      const snippet = d.snippet || '';
+      return {subject, from, date, snippet};
+    }));
+
+    // Send to Claude API for analysis
+    const emailsText = emails.map((e,i) => 
+      `Email ${i+1}:\nDe: ${e.from}\nFecha: ${e.date}\nAsunto: ${e.subject}\nResumen: ${e.snippet}`
+    ).join('\n\n---\n\n');
+
+    const claudeR = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{
+          role: 'user',
+          content: `Analiza estos correos electrónicos y extrae tareas o recordatorios importantes. 
+Contexto: El usuario es jefe de operaciones y finanzas de una empresa llamada Wila.
+Busca: pagos pendientes, fechas límite, reuniones, documentos a revisar, aprobaciones requeridas, facturas, etc.
+Solo incluye correos que realmente requieran acción.
+
+Responde SOLO con JSON válido (sin markdown), con este formato exacto:
+{"tareas":[{"titulo":"texto corto","nota":"detalle del correo","prioridad":"urgente|normal|baja","categoria":"💸 Pago|🤝 Reunión|📄 Entregable|🔄 Seguimiento|🗂 Administrativo|📦 Proveedor","emoji":"emoji relevante"}]}
+
+Si no hay tareas accionables, responde: {"tareas":[]}
+
+Correos:
+${emailsText}`
+        }]
+      })
+    });
+
+    const claudeD = await claudeR.json();
+    const text = claudeD.content[0].text;
+    const clean = text.replace(/```json|```/g,'').trim();
+    const parsed = JSON.parse(clean);
+    suggestions = parsed.tareas || [];
+    renderGmailPanel();
+
+  } catch(e) {
+    console.error('Gmail scan error:', e);
+    renderGmailPanel('Error al analizar correos. Intenta de nuevo.');
+  }
+  if(btn) btn.disabled = false;
+}
+
+async function addSuggestion(idx){
+  const s = suggestions[idx];
+  if(!s) return;
+  try {
+    const row = {user_id:currentUser.id, text:s.titulo, note:s.nota, priority:s.prioridad||'normal', category:s.categoria||'', ctx:'work', done:false};
+    const data = await apiPost('tasks', row);
+    tasks.unshift(mapTask(Array.isArray(data)?data[0]:data));
+    suggestions.splice(idx, 1);
+    toast('✅ Tarea agregada');
+    showSync();
+    renderGmailPanel();
+  } catch(e) {
+    toast('Error al agregar tarea');
+  }
+}
+
+function skipSuggestion(idx){
+  suggestions.splice(idx, 1);
+  renderGmailPanel();
+}
+
+function renderGmailPanel(msg){
+  const panel = document.getElementById('gmail-panel');
+  if(!panel) return;
+
+  if(!gmailToken){
+    panel.innerHTML = `
+      <div class="gmail-connect-card">
+        <h3>Conectar Gmail</h3>
+        <p>Conecta tu correo para que la IA analice tus emails y extraiga tareas automáticamente.</p>
+        <button class="btn-gmail" onclick="connectGmail()">
+          <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#EA4335" d="M5.266 9.765A7.077 7.077 0 0 1 12 4.909c1.69 0 3.218.6 4.418 1.582L19.91 3C17.782 1.145 15.055 0 12 0 7.27 0 3.198 2.698 1.24 6.65l4.026 3.115z"/><path fill="#34A853" d="M16.04 18.013c-1.09.703-2.474 1.078-4.04 1.078a7.077 7.077 0 0 1-6.723-4.823l-4.04 3.067A11.965 11.965 0 0 0 12 24c2.933 0 5.735-1.043 7.834-3l-3.793-2.987z"/><path fill="#4A90E2" d="M19.834 21c2.195-2.048 3.62-5.096 3.62-9 0-.71-.109-1.473-.272-2.182H12v4.637h6.436c-.317 1.559-1.17 2.766-2.395 3.558L19.834 21z"/><path fill="#FBBC05" d="M5.277 14.268A7.12 7.12 0 0 1 4.909 12c0-.782.125-1.533.357-2.235L1.24 6.65A11.934 11.934 0 0 0 0 12c0 1.92.445 3.73 1.237 5.335l4.04-3.067z"/></svg>
+          Conectar con Google
+        </button>
+        <div style="font-size:.68rem;color:var(--soft);margin-top:12px;line-height:1.5">Solo lectura — la app nunca enviará correos en tu nombre.</div>
+      </div>`;
+    return;
+  }
+
+  if(msg){
+    panel.innerHTML = `
+      <div class="gmail-status">
+        <div class="gmail-status-info">
+          <div class="gmail-status-email">✉ ${gmailEmail}</div>
+          <div class="gmail-status-sub">Conectado</div>
+        </div>
+        <button class="btn-scan" id="btn-scan" onclick="scanEmails()">🔍 Analizar</button>
+      </div>
+      <div style="text-align:center;padding:20px;color:var(--soft);font-size:.78rem">${msg}</div>`;
+    return;
+  }
+
+  let html = `
+    <div class="gmail-status">
+      <div class="gmail-status-info">
+        <div class="gmail-status-email">✉ ${gmailEmail}</div>
+        <div class="gmail-status-sub">${suggestions.length > 0 ? suggestions.length+' sugerencias encontradas' : 'Conectado'}</div>
+      </div>
+      <button class="btn-scan" id="btn-scan" onclick="scanEmails()">🔍 Analizar</button>
+    </div>`;
+
+  if(suggestions.length === 0){
+    html += `<div style="text-align:center;padding:20px;color:var(--soft);font-size:.78rem">Toca "Analizar" para revisar tus correos.</div>`;
+  } else {
+    html += `<div style="font-size:.7rem;color:var(--soft);letter-spacing:.08em;text-transform:uppercase;padding:4px 0">Sugerencias de la IA</div>`;
+    suggestions.forEach((s,i) => {
+      html += `
+        <div class="suggestion-card">
+          <div class="sug-header">
+            <div class="sug-icon">${s.emoji||'📧'}</div>
+            <div class="sug-body">
+              <div class="sug-title">${esc(s.titulo)}</div>
+              <div class="sug-meta">${s.categoria||''} · ${s.prioridad}</div>
+            </div>
+          </div>
+          ${s.nota?`<div class="sug-note">${esc(s.nota)}</div>`:''}
+          <div class="sug-actions">
+            <button class="btn-sug-add" onclick="addSuggestion(${i})">+ Agregar tarea</button>
+            <button class="btn-sug-skip" onclick="skipSuggestion(${i})">Ignorar</button>
+          </div>
+        </div>`;
+    });
+  }
+
+  html += `<button onclick="disconnectGmail()" style="background:transparent;border:none;color:var(--soft);font-size:.68rem;cursor:pointer;margin-top:4px;text-align:center;width:100%">Desconectar Gmail</button>`;
+  panel.innerHTML = html;
+}
+
+// Check for Gmail OAuth callback token in URL hash
+function checkGmailCallback(){
+  const hash = window.location.hash;
+  if(hash && hash.includes('access_token') && hash.includes('scope') && hash.includes('gmail')){
+    const params = new URLSearchParams(hash.substring(1));
+    const token = params.get('access_token');
+    if(token){
+      gmailToken = token;
+      localStorage.setItem('gmail_token', token);
+      window.history.replaceState(null,'',window.location.pathname);
+      // Get email and show panel
+      getGmailProfile().then(email => {
+        gmailEmail = email;
+        localStorage.setItem('gmail_email', email);
+        showSection('gmail');
+        renderGmailPanel();
+      }).catch(()=>{
+        gmailToken = null;
+        localStorage.removeItem('gmail_token');
+      });
+      return true;
+    }
+  }
+  return false;
+}
+
+// Load saved gmail token
+function loadGmailToken(){
+  const t = localStorage.getItem('gmail_token');
+  const e = localStorage.getItem('gmail_email');
+  if(t && e){ gmailToken = t; gmailEmail = e; }
 }
 
 init();
