@@ -256,7 +256,7 @@ body{background:var(--bg);font-family:'Inter',sans-serif;color:var(--text);min-h
   <div class="sec-tabs">
     <div class="sec-tab active" id="sec-tasks" onclick="showSection('tasks')">📋 TAREAS</div>
     <div class="sec-tab" id="sec-reminders" onclick="showSection('reminders')">🔔 RECORDATORIOS</div>
-    <div class="sec-tab" id="sec-gmail" onclick="showSection('gmail')">✉ GMAIL</div>
+    <div class="sec-tab" id="sec-import" onclick="showSection('import')">📥 IMPORTAR</div>
   </div>
 
   <div class="filters-wrap">
@@ -280,7 +280,15 @@ body{background:var(--bg);font-family:'Inter',sans-serif;color:var(--text);min-h
 
   <div class="list-wrap" id="task-list"></div>
   <div class="list-wrap" id="rem-list" style="display:none"></div>
-  <div id="gmail-panel" style="display:none;padding:16px 20px;flex-direction:column;gap:12px"></div>
+  <div id="import-panel" style="display:none;padding:16px 20px;flex-direction:column;gap:14px">
+    <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:20px;box-shadow:var(--shadow)">
+      <div style="font-family:'Syne',sans-serif;font-size:1rem;font-weight:700;margin-bottom:6px">📥 Importar tareas desde Claude</div>
+      <div style="font-size:.75rem;color:var(--soft);margin-bottom:16px;line-height:1.5">Pega aquí el bloque de tareas que te entregó Claude en el chat y se agregarán automáticamente.</div>
+      <textarea id="import-text" placeholder='Pega aquí el texto de Claude...' style="width:100%;min-height:160px;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:12px;font-family:'Inter',sans-serif;font-size:.85rem;color:var(--text);resize:vertical;outline:none;line-height:1.5"></textarea>
+      <button onclick="importTasks()" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#FF8C38,#E8610A);border:none;border-radius:12px;padding:14px;font-family:'Syne',sans-serif;font-size:.92rem;font-weight:700;color:#fff;cursor:pointer">IMPORTAR TAREAS</button>
+    </div>
+    <div id="import-result" style="display:none"></div>
+  </div>
   <button class="fab work-fab" id="fab" onclick="openModal()">+</button>
 </div>
 
@@ -568,15 +576,15 @@ function resetFilterBtns(){
 function showSection(sec){
   currentSec=sec;const isP=currentCtx==='personal';
   document.querySelectorAll('.sec-tab').forEach(t=>t.classList.remove('active','personal-mode'));
-  const at=document.getElementById('sec-'+sec);at.classList.add('active');if(isP&&sec!=='gmail')at.classList.add('personal-mode');
+  const at=document.getElementById('sec-'+sec);at.classList.add('active');
+  if(isP&&sec!=='import')at.classList.add('personal-mode');
   document.getElementById('task-list').style.display=sec==='tasks'?'flex':'none';
   document.getElementById('rem-list').style.display=sec==='reminders'?'flex':'none';
-  document.getElementById('gmail-panel').style.display=sec==='gmail'?'flex':'none';
+  document.getElementById('import-panel').style.display=sec==='import'?'flex':'none';
   document.getElementById('filters-tasks').style.display=sec==='tasks'?'flex':'none';
   document.getElementById('filters-rem').style.display=sec==='reminders'?'flex':'none';
-  document.getElementById('fab').style.display=sec==='gmail'?'none':'flex';
-  if(sec==='gmail') renderGmailPanel();
-  else render();
+  document.getElementById('fab').style.display=sec==='import'?'none':'flex';
+  if(sec!=='import') render();
 }
 
 // ── Modal ──
@@ -860,6 +868,72 @@ const dd=new Date();
 const ds=dd.toLocaleDateString('es',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 document.getElementById('hdr-date').textContent=ds.charAt(0).toUpperCase()+ds.slice(1);
 
+// ── Importar tareas desde Claude ──
+async function importTasks(){
+  const raw = document.getElementById('import-text').value.trim();
+  if(!raw){ toast('Pega el texto de Claude primero'); return; }
+
+  // Extract JSON from text — look for array of tasks
+  let taskList = [];
+  try {
+    // Try parsing directly
+    const parsed = JSON.parse(raw);
+    if(Array.isArray(parsed)) taskList = parsed;
+    else if(parsed.tareas) taskList = parsed.tareas;
+    else if(parsed.tasks) taskList = parsed.tasks;
+  } catch {
+    // Try extracting JSON from text
+    const match = raw.match(/\[[\s\S]*\]/) || raw.match(/\{[\s\S]*\}/);
+    if(match){
+      try {
+        const parsed = JSON.parse(match[0]);
+        if(Array.isArray(parsed)) taskList = parsed;
+        else if(parsed.tareas) taskList = parsed.tareas;
+      } catch { taskList = []; }
+    }
+  }
+
+  if(!taskList.length){
+    toast('No se encontraron tareas válidas');
+    return;
+  }
+
+  const resultEl = document.getElementById('import-result');
+  resultEl.style.display = 'flex';
+  resultEl.style.flexDirection = 'column';
+  resultEl.style.gap = '8px';
+  resultEl.innerHTML = `<div style="font-size:.75rem;color:var(--soft)">Importando ${taskList.length} tarea${taskList.length>1?'s':''}...</div>`;
+
+  let ok = 0, fail = 0;
+  for(const t of taskList){
+    try {
+      const row = {
+        user_id: currentUser.id,
+        text: t.titulo || t.text || t.title || 'Sin título',
+        note: t.nota || t.note || '',
+        priority: t.prioridad || t.priority || 'normal',
+        category: t.categoria || t.category || '',
+        deadline: t.fecha || t.deadline || null,
+        ctx: t.ctx || currentCtx,
+        done: false
+      };
+      const data = await apiPost('tasks', row);
+      tasks.unshift(mapTask(Array.isArray(data)?data[0]:data));
+      ok++;
+    } catch { fail++; }
+  }
+
+  document.getElementById('import-text').value = '';
+  resultEl.innerHTML = `
+    <div style="background:var(--green-bg);border:1.5px solid var(--green);border-radius:12px;padding:14px;text-align:center">
+      <div style="font-size:1.1rem;margin-bottom:4px">✅</div>
+      <div style="font-size:.85rem;font-weight:600;color:var(--green)">${ok} tarea${ok>1?'s':''} importada${ok>1?'s':''}</div>
+      ${fail?`<div style="font-size:.72rem;color:var(--soft);margin-top:4px">${fail} no se pudo${fail>1?'ron':''} importar</div>`:''}
+    </div>
+    <button onclick="showSection('tasks')" style="background:linear-gradient(135deg,#FF8C38,#E8610A);border:none;border-radius:12px;padding:12px;font-family:'Syne',sans-serif;font-size:.88rem;font-weight:700;color:#fff;cursor:pointer">Ver mis tareas →</button>`;
+  showSync();
+}
+
 async function init(){
   showLoading();
   try {
@@ -961,12 +1035,10 @@ async function scanEmails(){
       `Email ${i+1}:\nDe: ${e.from}\nFecha: ${e.date}\nAsunto: ${e.subject}\nResumen: ${e.snippet}`
     ).join('\n\n---\n\n');
 
-    const claudeR = await fetch('https://api.anthropic.com/v1/messages', {
+    const claudeR = await fetch('https://heartfelt-mermaid-e4ae35.netlify.app/.netlify/functions/claude', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
         messages: [{
           role: 'user',
           content: `Analiza estos correos electrónicos y extrae tareas o recordatorios importantes. 
