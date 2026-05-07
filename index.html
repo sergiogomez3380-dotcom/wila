@@ -400,7 +400,7 @@ function showApp(){document.getElementById('login-screen').style.display='none';
 // ── Auth ──
 async function loginGitHub(){
   showLoading();
-  const{error}=await window.db.auth.signInWithOAuth({provider:'github',options:{redirectTo:window.location.origin}});
+  const{error}=await window.db.auth.signInWithOAuth({provider:'github',options:{redirectTo:'https://sergiogomez3380-dotcom.github.io/wila'}});
   if(error){showLogin();toast('Error al iniciar sesión');}
 }
 async function logout(){
