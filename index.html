@@ -862,19 +862,27 @@ document.getElementById('hdr-date').textContent=ds.charAt(0).toUpperCase()+ds.sl
 
 async function init(){
   showLoading();
-  // Check if this is a Gmail OAuth callback
-  if(checkGmailCallback()) return;
   try {
     const user = await getSessionFromHash();
     if(user){
       currentUser=user;
-      console.log('User loaded:', currentUser.email);
       loadGmailToken();
       buildCatSelects();updateNotifBtn();showApp();
       await loadData();
+      // Check Gmail callback AFTER app is loaded
+      checkGmailCallback();
       if(NOTIF_OK){try{if(Notification.permission==='granted')setTimeout(checkNotifications,1200);}catch(e){}}
     } else {
-      showLogin();
+      // Check if this is a Gmail OAuth callback (has access_token but no Supabase session)
+      const hash = window.location.hash;
+      if(hash && hash.includes('access_token') && hash.includes('gmail')){
+        // Need to login with GitHub first
+        window.history.replaceState(null,'',window.location.pathname);
+        showLogin();
+        toast('Primero inicia sesión con GitHub');
+      } else {
+        showLogin();
+      }
     }
   } catch(e) {
     console.error('Init error:', e);
@@ -1079,28 +1087,28 @@ function renderGmailPanel(msg){
   panel.innerHTML = html;
 }
 
-// Check for Gmail OAuth callback token in URL hash
 function checkGmailCallback(){
   const hash = window.location.hash;
-  if(hash && hash.includes('access_token') && hash.includes('scope') && hash.includes('gmail')){
-    const params = new URLSearchParams(hash.substring(1));
-    const token = params.get('access_token');
-    if(token){
-      gmailToken = token;
-      localStorage.setItem('gmail_token', token);
-      window.history.replaceState(null,'',window.location.pathname);
-      // Get email and show panel
-      getGmailProfile().then(email => {
-        gmailEmail = email;
-        localStorage.setItem('gmail_email', email);
-        showSection('gmail');
-        renderGmailPanel();
-      }).catch(()=>{
-        gmailToken = null;
-        localStorage.removeItem('gmail_token');
-      });
-      return true;
-    }
+  if(!hash || !hash.includes('access_token')) return false;
+  const params = new URLSearchParams(hash.substring(1));
+  const scope = params.get('scope') || '';
+  // Only process if it's a Gmail token (has gmail scope)
+  if(!scope.includes('gmail')) return false;
+  const token = params.get('access_token');
+  if(token){
+    gmailToken = token;
+    localStorage.setItem('gmail_token', token);
+    window.history.replaceState(null,'',window.location.pathname);
+    getGmailProfile().then(email => {
+      gmailEmail = email;
+      localStorage.setItem('gmail_email', email);
+      showSection('gmail');
+      renderGmailPanel();
+    }).catch(()=>{
+      gmailToken = null;
+      localStorage.removeItem('gmail_token');
+    });
+    return true;
   }
   return false;
 }
