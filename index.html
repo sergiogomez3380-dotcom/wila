@@ -11,7 +11,6 @@
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -372,8 +371,91 @@ if('serviceWorker' in navigator){
 
 const SUPA_URL='https://dzjnghesvgowsoibhhtd.supabase.co';
 const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR6am5naGVzdmdvd3NvaWJoaHRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwNzY2NzQsImV4cCI6MjA5MzY1MjY3NH0.M_haHythB_tIEqdcrhFqEmFOQcI-ud9agOPqpfPR-os';
-window.db = window.supabase.createClient(SUPA_URL, SUPA_KEY);
 const NOTIF_OK=(typeof window!=='undefined'&&'Notification' in window);
+
+// ── REST API helpers ──
+let accessToken = null;
+
+function apiHeaders(){
+  const h = {'Content-Type':'application/json','apikey':SUPA_KEY,'Prefer':'return=representation'};
+  if(accessToken) h['Authorization']='Bearer '+accessToken;
+  return h;
+}
+
+async function apiGet(table, filters=''){
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${filters}`, {headers:apiHeaders()});
+  if(!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function apiPost(table, data){
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {method:'POST', headers:apiHeaders(), body:JSON.stringify(data)});
+  if(!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function apiPatch(table, id, data){
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {method:'PATCH', headers:{...apiHeaders(),'Prefer':'return=representation'}, body:JSON.stringify(data)});
+  if(!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function apiDelete(table, id){
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {method:'DELETE', headers:apiHeaders()});
+  if(!r.ok) throw new Error(await r.text());
+}
+
+// ── Auth via OAuth ──
+function loginGitHub(){
+  const redirectTo = encodeURIComponent('https://sergiogomez3380-dotcom.github.io/wila');
+  window.location.href = `${SUPA_URL}/auth/v1/authorize?provider=github&redirect_to=${redirectTo}`;
+}
+
+async function logout(){
+  if(accessToken){
+    await fetch(`${SUPA_URL}/auth/v1/logout`, {method:'POST', headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+accessToken}});
+  }
+  accessToken=null; currentUser=null; tasks=[]; reminders=[];
+  localStorage.removeItem('wila_token');
+  localStorage.removeItem('wila_user');
+  showLogin();
+}
+
+async function getSessionFromHash(){
+  // Check URL hash for OAuth callback tokens
+  const hash = window.location.hash;
+  if(hash && hash.includes('access_token')){
+    const params = new URLSearchParams(hash.substring(1));
+    const token = params.get('access_token');
+    if(token){
+      accessToken = token;
+      localStorage.setItem('wila_token', token);
+      // Get user info
+      const r = await fetch(`${SUPA_URL}/auth/v1/user`, {headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+token}});
+      if(r.ok){
+        const user = await r.json();
+        localStorage.setItem('wila_user', JSON.stringify(user));
+        window.history.replaceState(null, '', window.location.pathname);
+        return user;
+      }
+    }
+  }
+  // Check localStorage
+  const savedToken = localStorage.getItem('wila_token');
+  const savedUser = localStorage.getItem('wila_user');
+  if(savedToken && savedUser){
+    // Verify token is still valid
+    const r = await fetch(`${SUPA_URL}/auth/v1/user`, {headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+savedToken}});
+    if(r.ok){
+      accessToken = savedToken;
+      return JSON.parse(savedUser);
+    } else {
+      localStorage.removeItem('wila_token');
+      localStorage.removeItem('wila_user');
+    }
+  }
+  return null;
+}
 
 const CATS={
   work:{
@@ -397,17 +479,6 @@ function showLogin(){document.getElementById('login-screen').style.display='flex
 function showLoading(){document.getElementById('login-screen').style.display='none';document.getElementById('loading-screen').style.display='flex';document.getElementById('app-screen').style.display='none';}
 function showApp(){document.getElementById('login-screen').style.display='none';document.getElementById('loading-screen').style.display='none';document.getElementById('app-screen').style.display='block';}
 
-// ── Auth ──
-async function loginGitHub(){
-  showLoading();
-  const{error}=await window.db.auth.signInWithOAuth({provider:'github',options:{redirectTo:'https://sergiogomez3380-dotcom.github.io/wila'}});
-  if(error){showLogin();toast('Error al iniciar sesión');}
-}
-async function logout(){
-  await window.db.auth.signOut();
-  currentUser=null;tasks=[];reminders=[];showLogin();
-}
-
 // ── Sync dot ──
 function showSync(){
   const el=document.getElementById('sync-dot');
@@ -418,9 +489,9 @@ function showSync(){
 // ── Load ──
 async function loadData(){
   const uid=currentUser.id;
-  const[{data:t},{data:r}]=await Promise.all([
-    window.db.from('tasks').select('*').eq('user_id',uid).order('created_at',{ascending:false}),
-    window.db.from('reminders').select('*').eq('user_id',uid).order('next_date',{ascending:true})
+  const [t, r] = await Promise.all([
+    apiGet('tasks', `user_id=eq.${uid}&order=created_at.desc`),
+    apiGet('reminders', `user_id=eq.${uid}&order=next_date.asc`)
   ]);
   tasks=(t||[]).map(mapTask);
   reminders=(r||[]).map(mapRem);
@@ -503,23 +574,25 @@ async function submitTask(){
   const text=document.getElementById('t-text').value.trim();
   if(!text){document.getElementById('t-text').focus();return;}
   const btn=document.getElementById('btn-submit-task');btn.disabled=true;
-  const row={user_id:currentUser.id,text,note:document.getElementById('t-note').value.trim(),priority:selPrioVal,category:document.getElementById('t-cat').value,deadline:document.getElementById('t-date').value||null,ctx:currentCtx,done:false};
-  const{data,error}=await window.db.from('tasks').insert(row).select().single();
+  try{
+    const row={user_id:currentUser.id,text,note:document.getElementById('t-note').value.trim(),priority:selPrioVal,category:document.getElementById('t-cat').value,deadline:document.getElementById('t-date').value||null,ctx:currentCtx,done:false};
+    const data=await apiPost('tasks',row);
+    tasks.unshift(mapTask(Array.isArray(data)?data[0]:data));
+    closeModal('task');render();toast('✅ Tarea guardada');showSync();
+  }catch(e){toast('Error al guardar: '+e.message);}
   btn.disabled=false;
-  if(error){toast('Error al guardar');return;}
-  tasks.unshift(mapTask(data));closeModal('task');render();toast('✅ Tarea guardada');showSync();
 }
 
 async function toggleDone(id){
   const t=tasks.find(t=>t.id===id);if(!t)return;
   t.done=!t.done;t.doneAt=t.done?new Date().toISOString():null;render();
-  await window.db.from('tasks').update({done:t.done,done_at:t.doneAt}).eq('id',id);showSync();
+  try{await apiPatch('tasks',id,{done:t.done,done_at:t.doneAt});showSync();}catch(e){}
 }
 
 async function deleteTask(id){
   if(!confirm('¿Eliminar esta tarea?'))return;
   tasks=tasks.filter(t=>t.id!==id);render();
-  await window.db.from('tasks').delete().eq('id',id);toast('Tarea eliminada');
+  try{await apiDelete('tasks',id);toast('Tarea eliminada');}catch(e){}
 }
 
 // ── CRUD Reminders ──
@@ -529,25 +602,26 @@ async function submitReminder(){
   if(!text){document.getElementById('r-text').focus();return;}
   if(!date){toast('Ingresa la próxima fecha');document.getElementById('r-date').focus();return;}
   const btn=document.getElementById('btn-submit-rem');btn.disabled=true;
-  const row={user_id:currentUser.id,text,note:document.getElementById('r-note').value.trim(),cycle:selCycleVal,next_date:date,category:document.getElementById('r-cat').value,advance:parseInt(document.getElementById('r-advance').value),ctx:currentCtx};
-  const{data,error}=await window.db.from('reminders').insert(row).select().single();
+  try{
+    const row={user_id:currentUser.id,text,note:document.getElementById('r-note').value.trim(),cycle:selCycleVal,next_date:date,category:document.getElementById('r-cat').value,advance:parseInt(document.getElementById('r-advance').value),ctx:currentCtx};
+    const data=await apiPost('reminders',row);
+    reminders.push(mapRem(Array.isArray(data)?data[0]:data));
+    reminders.sort((a,b)=>dayDiff(a.nextDate)-dayDiff(b.nextDate));
+    closeModal('rem');render();toast('🔔 Recordatorio guardado');showSync();checkNotifications();
+  }catch(e){toast('Error al guardar: '+e.message);}
   btn.disabled=false;
-  if(error){toast('Error al guardar');return;}
-  reminders.push(mapRem(data));reminders.sort((a,b)=>dayDiff(a.nextDate)-dayDiff(b.nextDate));
-  closeModal('rem');render();toast('🔔 Recordatorio guardado');showSync();checkNotifications();
 }
 
 async function markRemDone(id){
   const r=reminders.find(r=>r.id===id);if(!r)return;
   r.nextDate=nextDate(r.nextDate,r.cycle);render();
-  await window.db.from('reminders').update({next_date:r.nextDate}).eq('id',id);
-  toast('✅ Listo. Próximo: '+fmtDate(r.nextDate));showSync();
+  try{await apiPatch('reminders',id,{next_date:r.nextDate});toast('✅ Listo. Próximo: '+fmtDate(r.nextDate));showSync();}catch(e){}
 }
 
 async function deleteRem(id){
   if(!confirm('¿Eliminar este recordatorio?'))return;
   reminders=reminders.filter(r=>r.id!==id);render();
-  await window.db.from('reminders').delete().eq('id',id);
+  try{await apiDelete('reminders',id);}catch(e){}
 }
 
 // ── Edit Reminder ──
@@ -575,8 +649,11 @@ async function saveEditRem(){
   r.text=text;r.note=document.getElementById('er-note').value.trim();
   r.cycle=editCycleVal;r.nextDate=document.getElementById('er-date').value;
   r.category=document.getElementById('er-cat').value;r.advance=document.getElementById('er-advance').value;
-  await window.db.from('reminders').update({text:r.text,note:r.note,cycle:r.cycle,next_date:r.nextDate,category:r.category,advance:parseInt(r.advance)}).eq('id',editRemId);
-  btn.disabled=false;closeModal('edit-rem');render();toast('✅ Recordatorio actualizado');showSync();
+  try{
+    await apiPatch('reminders',editRemId,{text:r.text,note:r.note,cycle:r.cycle,next_date:r.nextDate,category:r.category,advance:parseInt(r.advance)});
+    closeModal('edit-rem');render();toast('✅ Recordatorio actualizado');showSync();
+  }catch(e){toast('Error al guardar');}
+  btn.disabled=false;
 }
 
 // ── Notifications ──
@@ -755,16 +832,14 @@ document.getElementById('hdr-date').textContent=ds.charAt(0).toUpperCase()+ds.sl
 async function init(){
   showLoading();
   try {
-    const {data:{session}, error} = await window.db.auth.getSession();
-    console.log('Session:', JSON.stringify(session), 'Error:', error);
-    if(session && session.user){
-      currentUser=session.user;
-      console.log('User:', currentUser.email);
+    const user = await getSessionFromHash();
+    if(user){
+      currentUser=user;
+      console.log('User loaded:', currentUser.email);
       buildCatSelects();updateNotifBtn();showApp();
       await loadData();
       if(NOTIF_OK){try{if(Notification.permission==='granted')setTimeout(checkNotifications,1200);}catch(e){}}
     } else {
-      console.log('No session → login');
       showLogin();
     }
   } catch(e) {
@@ -773,18 +848,10 @@ async function init(){
   }
 }
 
-window.db.auth.onAuthStateChange(async(event,session)=>{
-  if(event==='SIGNED_IN'&&session){
-    currentUser=session.user;buildCatSelects();updateNotifBtn();showApp();await loadData();
-  } else if(event==='SIGNED_OUT'){showLogin();}
-});
-
 init();
-// Desregistrar service workers que puedan interferir
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.getRegistrations().then(regs => {
-    regs.forEach(reg => reg.unregister());
-  });
+  navigator.serviceWorker.getRegistrations().then(regs=>regs.forEach(r=>r.unregister()));
+  caches.keys().then(keys=>keys.forEach(k=>caches.delete(k)));
 }
 </script>
 </body>
