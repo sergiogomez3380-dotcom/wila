@@ -868,57 +868,72 @@ const dd=new Date();
 const ds=dd.toLocaleDateString('es',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 document.getElementById('hdr-date').textContent=ds.charAt(0).toUpperCase()+ds.slice(1);
 
-// ── Importar tareas desde Claude ──
+// ── Importar tareas/recordatorios desde Claude ──
 async function importTasks(){
   const raw = document.getElementById('import-text').value.trim();
   if(!raw){ toast('Pega el texto de Claude primero'); return; }
 
-  // Extract JSON from text — look for array of tasks
-  let taskList = [];
+  let itemList = [];
   try {
-    // Try parsing directly
     const parsed = JSON.parse(raw);
-    if(Array.isArray(parsed)) taskList = parsed;
-    else if(parsed.tareas) taskList = parsed.tareas;
-    else if(parsed.tasks) taskList = parsed.tasks;
+    if(Array.isArray(parsed)) itemList = parsed;
+    else if(parsed.tareas) itemList = parsed.tareas;
+    else if(parsed.tasks) itemList = parsed.tasks;
+    else if(parsed.recordatorios) itemList = parsed.recordatorios;
   } catch {
-    // Try extracting JSON from text
     const match = raw.match(/\[[\s\S]*\]/) || raw.match(/\{[\s\S]*\}/);
     if(match){
       try {
         const parsed = JSON.parse(match[0]);
-        if(Array.isArray(parsed)) taskList = parsed;
-        else if(parsed.tareas) taskList = parsed.tareas;
-      } catch { taskList = []; }
+        if(Array.isArray(parsed)) itemList = parsed;
+        else if(parsed.tareas) itemList = parsed.tareas;
+        else if(parsed.recordatorios) itemList = parsed.recordatorios;
+      } catch { itemList = []; }
     }
   }
 
-  if(!taskList.length){
-    toast('No se encontraron tareas válidas');
-    return;
-  }
+  if(!itemList.length){ toast('No se encontraron elementos válidos'); return; }
 
   const resultEl = document.getElementById('import-result');
   resultEl.style.display = 'flex';
   resultEl.style.flexDirection = 'column';
   resultEl.style.gap = '8px';
-  resultEl.innerHTML = `<div style="font-size:.75rem;color:var(--soft)">Importando ${taskList.length} tarea${taskList.length>1?'s':''}...</div>`;
+  resultEl.innerHTML = `<div style="font-size:.75rem;color:var(--soft)">Importando ${itemList.length} elemento${itemList.length>1?'s':''}...</div>`;
 
   let ok = 0, fail = 0;
-  for(const t of taskList){
+  for(const item of itemList){
     try {
-      const row = {
-        user_id: currentUser.id,
-        text: t.titulo || t.text || t.title || 'Sin título',
-        note: t.nota || t.note || '',
-        priority: t.prioridad || t.priority || 'normal',
-        category: t.categoria || t.category || '',
-        deadline: t.fecha || t.deadline || null,
-        ctx: t.ctx || currentCtx,
-        done: false
-      };
-      const data = await apiPost('tasks', row);
-      tasks.unshift(mapTask(Array.isArray(data)?data[0]:data));
+      const tipo = item.tipo || item.type || 'tarea';
+      if(tipo === 'recordatorio'){
+        // Create reminder
+        const row = {
+          user_id: currentUser.id,
+          text: item.titulo || item.text || item.title || 'Sin título',
+          note: item.nota || item.note || '',
+          cycle: item.ciclo || item.cycle || 'mensual',
+          next_date: item.proxima_fecha || item.next_date || new Date().toISOString().split('T')[0],
+          category: item.categoria || item.category || '',
+          advance: item.anticipacion || item.advance || 3,
+          ctx: item.ctx || currentCtx
+        };
+        const data = await apiPost('reminders', row);
+        reminders.push(mapRem(Array.isArray(data)?data[0]:data));
+        reminders.sort((a,b)=>dayDiff(a.nextDate)-dayDiff(b.nextDate));
+      } else {
+        // Create task
+        const row = {
+          user_id: currentUser.id,
+          text: item.titulo || item.text || item.title || 'Sin título',
+          note: item.nota || item.note || '',
+          priority: item.prioridad || item.priority || 'normal',
+          category: item.categoria || item.category || '',
+          deadline: item.fecha || item.deadline || null,
+          ctx: item.ctx || currentCtx,
+          done: false
+        };
+        const data = await apiPost('tasks', row);
+        tasks.unshift(mapTask(Array.isArray(data)?data[0]:data));
+      }
       ok++;
     } catch { fail++; }
   }
@@ -927,10 +942,11 @@ async function importTasks(){
   resultEl.innerHTML = `
     <div style="background:var(--green-bg);border:1.5px solid var(--green);border-radius:12px;padding:14px;text-align:center">
       <div style="font-size:1.1rem;margin-bottom:4px">✅</div>
-      <div style="font-size:.85rem;font-weight:600;color:var(--green)">${ok} tarea${ok>1?'s':''} importada${ok>1?'s':''}</div>
+      <div style="font-size:.85rem;font-weight:600;color:var(--green)">${ok} elemento${ok>1?'s':''} importado${ok>1?'s':''}</div>
       ${fail?`<div style="font-size:.72rem;color:var(--soft);margin-top:4px">${fail} no se pudo${fail>1?'ron':''} importar</div>`:''}
     </div>
-    <button onclick="showSection('tasks')" style="background:linear-gradient(135deg,#FF8C38,#E8610A);border:none;border-radius:12px;padding:12px;font-family:'Syne',sans-serif;font-size:.88rem;font-weight:700;color:#fff;cursor:pointer">Ver mis tareas →</button>`;
+    <button onclick="showSection('reminders')" style="background:linear-gradient(135deg,#FF8C38,#E8610A);border:none;border-radius:12px;padding:12px;font-family:'Syne',sans-serif;font-size:.88rem;font-weight:700;color:#fff;cursor:pointer">Ver recordatorios →</button>
+    <button onclick="showSection('tasks')" style="background:var(--surface2);border:1.5px solid var(--border);border-radius:12px;padding:12px;font-family:'Inter',sans-serif;font-size:.85rem;font-weight:600;color:var(--soft);cursor:pointer">Ver tareas →</button>`;
   showSync();
 }
 
