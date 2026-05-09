@@ -248,7 +248,7 @@ body{background:var(--bg);font-family:'Inter',sans-serif;color:var(--text);min-h
     <div class="stats-row">
       <div class="stat-card"><div class="stat-num alert" id="st-vencidas">0</div><div class="stat-label">Vencidas</div></div>
       <div class="stat-card"><div class="stat-num" id="st-hoy">0</div><div class="stat-label">Hoy</div></div>
-      <div class="stat-card"><div class="stat-num" id="st-done">0</div><div class="stat-label">Listas</div></div>
+      <div class="stat-card"><div class="stat-num" id="st-done">0</div><div class="stat-label">Pendientes</div></div>
       <div class="stat-card"><div class="stat-num alert" id="st-rem">0</div><div class="stat-label">Recurrentes</div></div>
     </div>
   </div>
@@ -787,7 +787,7 @@ function updateStats(){
   const mr=reminders.filter(r=>r.ctx===currentCtx);
   document.getElementById('st-vencidas').textContent=mt.filter(t=>isVencida(t)).length;
   document.getElementById('st-hoy').textContent=mt.filter(t=>isHoy(t)).length+mr.filter(r=>dayDiff(r.nextDate)===0).length;
-  document.getElementById('st-done').textContent=mt.filter(t=>{if(!t.done||!t.doneAt)return false;const d=new Date(t.doneAt);d.setHours(0,0,0,0);return d.getTime()===t0.getTime();}).length;
+  document.getElementById('st-done').textContent=mt.filter(t=>!t.done).length;
   document.getElementById('st-rem').textContent=mr.filter(r=>isRemDue(r)).length;
 }
 
@@ -845,7 +845,14 @@ function render(){
     const pending=items.filter(t=>!t.done);const done=items.filter(t=>t.done);
     pending.sort((a,b)=>{const s=t=>isVencida(t)?0:isHoy(t)?1:t.priority==='urgente'?2:3;return s(a)-s(b);});
     let html=pending.map(t=>taskCardHTML(t)).join('');
-    if(done.length){html+=`<div class="section-lbl">Completadas</div>`;html+=done.map(t=>taskCardHTML(t)).join('');}
+    if(done.length){
+      html+=`<div class="section-lbl" style="cursor:pointer;user-select:none" onclick="toggleDoneSection(this)">
+        <span id="done-arrow">▶</span> Completadas (${done.length})
+      </div>
+      <div id="done-section" style="display:none;flex-direction:column;gap:9px">
+        ${done.map(t=>taskCardHTML(t)).join('')}
+      </div>`;
+    }
     list.innerHTML=html;
   }
   if(currentSec==='reminders'){
@@ -857,6 +864,17 @@ function render(){
     if(pending.length){if(due.length)html+=`<div class="section-lbl">Próximos</div>`;html+=pending.map(r=>remCardHTML(r)).join('');}
     list.innerHTML=html;
   }
+}
+
+function toggleDoneSection(el){
+  const section = document.getElementById('done-section');
+  const arrow = document.getElementById('done-arrow');
+  if(!section) return;
+  const isOpen = section.style.display === 'flex';
+  section.style.display = isOpen ? 'none' : 'flex';
+  section.style.flexDirection = 'column';
+  section.style.gap = '9px';
+  if(arrow) arrow.textContent = isOpen ? '▶' : '▼';
 }
 
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');}
